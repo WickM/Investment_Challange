@@ -1,0 +1,41 @@
+---
+title: "Data EDA"
+output: html_notebook
+---
+
+```{r}
+library(here)
+library(tidyverse)
+library(fs)
+library(readxl)
+```
+
+
+```{r}
+data_path <- here("01_data/848508_1447516_bundle_archive/Data/Data/")
+ticker <- read_excel(here("/01_data/848508_1447516_bundle_archive/Tickers.xlsx")) 
+stock <- read_csv(file.path(data_path, "0126.HK", "0126.HK.csv"))
+```
+
+```{r}
+ggchart <- function(x, y){
+  ggplot() +
+    geom_line(aes(x = x, y = y))
+}
+
+ggchart(stock$Date, stock$High)
+ggchart(stock$Date, stock$Volume)
+ggchart(stock$Date[1:10], stock$Close[1:10])
+ggchart(stock$Date[1:100], stock$Volume[1:100])
+
+ggplot() +
+  geom_line(aes(x = stock$Date[1:10], y = as.numeric(stock$Open[1:10])))
+
+```
+
+```{r}
+
+
+
+```
+
