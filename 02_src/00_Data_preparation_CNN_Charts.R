@@ -127,14 +127,18 @@ fs::dir_create(dir)
 
 files <- fs::dir_ls(path = here(data_path), glob = "*.csv", recurse = TRUE)
 
-dat_stock_plots <- future_map(sample(x = seq(1, length(files)), size = 100000, replace = TRUE) ,
-                              ~ generate_data(ind = .x, file_path = files, anzahl_Tage = 200, dir = dir) ) %>%
+dat_stock_plots_orig <- future_map(sample(x = seq(1, length(files)), size = 200000, replace = TRUE) ,
+                              ~ generate_data(ind = .x, file_path = files, anzahl_Tage = 200, dir = dir) )
+saveRDS(file = "03_output/prep_data_genImage_Part1.rds", object = dat_stock_plots_orig)
+
+dat_stock_plots <- dat_stock_plots_orig %>%
   compact() %>%
   transpose()
 
 dat_stock_plots<- as_tibble(dat_stock_plots)
 saveRDS(file = "03_output/prep_data_genImage_Part1.rds", object = dat_stock_plots)
 saveRDS(file = path(dir, "prep_data_genImage_Part1.rds"), object = dat_stock_plots)
+
 
 ####Data Generation Part2-Data generation----
 
