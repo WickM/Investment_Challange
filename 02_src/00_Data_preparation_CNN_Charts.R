@@ -93,6 +93,7 @@ load_data <- function(dat_gen, ind, spalten = c("Open", "High", "Low", "Close", 
   path <- pluck(dat_gen$plots[ind]) %>%
     unlist() %>%
     here()
+
   if (length(path) == length(spalten)){
     channels <- length(path)
 
@@ -127,80 +128,78 @@ fs::dir_create(dir)
 
 files <- fs::dir_ls(path = here(data_path), glob = "*.csv", recurse = TRUE)
 
-dat_stock_plots_orig <- future_map(sample(x = seq(1, length(files)), size = 200000, replace = TRUE) ,
-                              ~ generate_data(ind = .x, file_path = files, anzahl_Tage = 200, dir = dir) )
-saveRDS(file = "03_output/prep_data_genImage_Part1.rds", object = dat_stock_plots_orig)
+parts <- seq(1, 20)
+for (part in parts) {
+  print(part)
+  dat_stock_plots_orig <- future_map(sample(x = seq(1, length(files)), size = 10000, replace = TRUE) ,
+                                     ~ generate_data(ind = .x, file_path = files, anzahl_Tage = 200, dir = dir) )
+  saveRDS(file = path(dir, glue::glue("prep_data_genImage_Part1_{part}.rds")), object = dat_stock_plots_orig)
+}
 
-dat_stock_plots <- dat_stock_plots_orig %>%
-  compact() %>%
-  transpose()
+for (part in parts) {
+  print(part)
+  dat_stock_plots <- read_rds(path(dir, glue::glue("prep_data_genImage_Part1_{part}.rds"))) %>%
+    compact() %>%
+    purrr::transpose() %>%
+    as_tibble()
 
-dat_stock_plots<- as_tibble(dat_stock_plots)
-saveRDS(file = "03_output/prep_data_genImage_Part1.rds", object = dat_stock_plots)
-saveRDS(file = path(dir, "prep_data_genImage_Part1.rds"), object = dat_stock_plots)
+  #### Data Generation Part2-Data generation----
 
+  img_array <- future_map(seq(1, nrow(dat_stock_plots)), ~ load_data(dat_gen = dat_stock_plots, ind = .x))
+  img_array <- compact(img_array)
+  img_array <- abind::abind(img_array, along = 1)
 
-####Data Generation Part2-Data generation----
+  saveRDS(file = path(dir, glue::glue("prep_data_genImage_Part2_{part}.rds")), object = img_array)
 
-img_array <- future_map(seq(1,nrow(dat_stock_plots)), ~ load_data(dat_gen = dat_stock_plots, ind = .x))
-img_array <-  compact(img_array)
-c <- abind::abind(img_array, along = 1)
-dim(img_array)
-saveRDS(file = "03_output/prep_data_genImage_Part2.rds", object = img_array)
-saveRDS(file = path(dir, "prep_data_genImage_Part2.rds"), object = img_array)
+  #### Data Generation Part3-Test-Train-Data---
+  # Classification labels 0=Stock is lower or equal than yesterday, 1=Stock is higher than yesterday
 
-####Data Generation Part3-Test-Train-Data---
-#Classification labels 0=Stock is lower or equal than yesterday, 1=Stock is higher than yesterday
+  temp_train_y <- dat_stock_plots %>%
+    hoist(data_ende, close = "Close") %>%
+    hoist(predict_data, close_pred = list("Close", 1), .remove = FALSE) %>%
+    mutate(
+      "close" = as.numeric(close),
+      "close_pred" = as.numeric(close_pred)
+    ) %>%
+    mutate(label = if_else(close >= close_pred, 0, 1))
 
-dat_stock_plots <- read_rds(path("03_output/","prep_data_genImage_Part1.rds"))
-img_array <- read_rds(path("03_output/","prep_data_genImage_Part2.rds"))
+  ind <- which(is.na(temp_train_y$label))
+  img_array <- img_array[-ind, , , ]
+  temp_train_y <- temp_train_y[-ind, ]
 
+  # Train, Test, Validation Split
+  # 0,70, 0,20, 0,10
 
-temp_train_y <- dat_stock_plots %>%
-  hoist(data_ende, close = "Close") %>%
-  hoist(predict_data, close_pred = list("Close", 1), .remove = FALSE
-        ) %>%
-  mutate("close" = as.numeric(close),
-         "close_pred" = as.numeric(close_pred)) %>%
-  mutate(label= if_else(close >= close_pred, 0, 1))
+  # Test Data
+  sample <- caTools::sample.split(temp_train_y$label, SplitRatio = .70)
+  ind_test <- which(sample == FALSE)
+  test_x <- img_array[ind_test, , , ]
+  test_y <- temp_train_y$label[ind_test]
 
-ind <- which(is.na(temp_train_y$label))
-img_array <- img_array[-ind, , , ]
-temp_train_y <- temp_train_y[-ind, ]
+  temp_train_y <- temp_train_y[-ind_test, ]
+  img_array <- img_array[-ind_test, , , ]
 
-#Train, Test, Validation Split
-#0,70, 0,20, 0,10
+  # Train and Val Data
+  sample <- caTools::sample.split(temp_train_y$label, SplitRatio = .90)
+  ind_train <- which(sample == TRUE)
+  train_x <- img_array[ind_train, , , ]
+  train_y <- temp_train_y$label[ind_train]
 
-#Test Data
-sample = caTools::sample.split(temp_train_y$label, SplitRatio = .70)
-ind_test <- which (sample == FALSE)
-test_x <- img_array[ind_test,,,]
-test_y <- temp_train_y$label[ind_test]
+  # Validation
+  ind_val <- which(sample == FALSE)
+  val_x <- img_array[ind_val, , , ]
+  val_y <- temp_train_y$label[ind_val]
 
-temp_train_y <- temp_train_y[-ind_test,]
-img_array <- img_array[-ind_test,,,]
+  #### Data Generation Part4-pack Data together---
 
-#Train and Val Data
-sample = caTools::sample.split(temp_train_y$label, SplitRatio = .90)
-ind_train <- which (sample == TRUE)
-train_x <- img_array[ind_train,,,]
-train_y <- temp_train_y$label[ind_train]
-
-# Validation
-ind_val <- which (sample == FALSE)
-val_x <- img_array[ind_val,,,]
-val_y <- temp_train_y$label[ind_val]
-
-####Data Generation Part4-pack Data together---
-
-stock_classification_data <- list(
-  train_x = train_x,
-  train_y = train_y,
-  test_x = test_x,
-  test_y = test_y,
-  val_x = val_x,
-  val_y = val_y
-)
-
-saveRDS(file = "03_output/classification_data.rds", object = stock_classification_data)
-saveRDS(file = path(dir, "classification_data.rds"), object = stock_classification_data)
+  stock_classification_data <- list(
+    train_x = train_x,
+    train_y = train_y,
+    test_x = test_x,
+    test_y = test_y,
+    val_x = val_x,
+    val_y = val_y
+  )
+  saveRDS(file = path(dir, glue::glue("stock_classification_data_{part}.rds")), object = stock_classification_data)
+  gc(verbose = TRUE)
+}
